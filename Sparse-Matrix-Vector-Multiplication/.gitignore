@@ -1,0 +1,35 @@
+# Compiled Object files
+*.o
+*.obj
+
+# Executables
+validate
+benchmark
+*.exe
+*.out
+
+# Build artifacts
+*.a
+*.so
+*.dylib
+
+# Results
+benchmark_results.csv
+results/
+*.png
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

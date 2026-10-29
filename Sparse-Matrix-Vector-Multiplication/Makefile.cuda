@@ -1,0 +1,109 @@
+# Makefile for CUDA-enabled builds
+# Requires: CUDA Toolkit installed
+
+# Compilers
+CXX = g++
+NVCC = nvcc
+
+# Compiler flags
+CXXFLAGS = -std=c++17 -Wall -Wextra -O3 -fopenmp -Isrc -Isrc/serial -Isrc/openmp -Isrc/cuda
+NVCCFLAGS = -std=c++17 -O3 -arch=sm_60 --compiler-options -fopenmp -Isrc -Isrc/serial -Isrc/openmp -Isrc/cuda
+LDFLAGS = -fopenmp -lcudart
+
+# CUDA paths (adjust if needed)
+CUDA_PATH ?= /usr/local/cuda
+CUDA_INC = -I$(CUDA_PATH)/include
+CUDA_LIB = -L$(CUDA_PATH)/lib64
+
+# Source directories
+SRC_DIR = src
+SERIAL_DIR = $(SRC_DIR)/serial
+OPENMP_DIR = $(SRC_DIR)/openmp
+CUDA_DIR = $(SRC_DIR)/cuda
+TESTING_DIR = $(SRC_DIR)/testing
+PLOTTING_DIR = $(SRC_DIR)/plotting
+
+# Source files
+SPARSE_MATRIX_SRC = $(SRC_DIR)/SparseMatrix.cpp
+SERIAL_SRC = $(SERIAL_DIR)/serial_spmv.cpp
+OPENMP_SRC = $(OPENMP_DIR)/parallel_spmv.cpp
+CUDA_SRC = $(CUDA_DIR)/cuda_spmv.cu
+
+CPP_SOURCES = $(SPARSE_MATRIX_SRC) $(SERIAL_SRC) $(OPENMP_SRC)
+CU_SOURCES = $(CUDA_SRC)
+
+CPP_OBJECTS = SparseMatrix.o serial_spmv.o parallel_spmv.o
+CU_OBJECTS = cuda_spmv.o
+
+# Headers
+SPARSE_MATRIX_HDR = $(SRC_DIR)/SparseMatrix.h
+SERIAL_HDR = $(SERIAL_DIR)/serial_spmv.h
+OPENMP_HDR = $(OPENMP_DIR)/parallel_spmv.h
+CUDA_HDR = $(CUDA_DIR)/cuda_spmv.cuh
+HEADERS = $(SPARSE_MATRIX_HDR) $(SERIAL_HDR) $(OPENMP_HDR) $(CUDA_HDR)
+
+# Executables
+TARGETS = validate_cuda benchmark_cuda
+
+# Default target
+all: $(TARGETS)
+
+# Check CUDA availability
+check_cuda:
+	@which nvcc > /dev/null || (echo "ERROR: nvcc not found. Please install CUDA Toolkit." && exit 1)
+	@echo "CUDA compiler found: $$(which nvcc)"
+	@echo "CUDA version: $$(nvcc --version | grep release | awk '{print $$5}')"
+
+# Validate program with CUDA
+validate_cuda: validate_cuda.o $(CPP_OBJECTS) $(CU_OBJECTS)
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LIB) $(LDFLAGS)
+
+# Benchmark program with CUDA
+benchmark_cuda: benchmark_cuda.o $(CPP_OBJECTS) $(CU_OBJECTS)
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ $(CUDA_LIB) $(LDFLAGS)
+
+# C++ object files
+SparseMatrix.o: $(SPARSE_MATRIX_SRC) $(SPARSE_MATRIX_HDR)
+	$(CXX) $(CXXFLAGS) $(CUDA_INC) -c $< -o $@
+
+serial_spmv.o: $(SERIAL_SRC) $(SERIAL_HDR) $(SPARSE_MATRIX_HDR)
+	$(CXX) $(CXXFLAGS) $(CUDA_INC) -c $< -o $@
+
+parallel_spmv.o: $(OPENMP_SRC) $(OPENMP_HDR) $(SPARSE_MATRIX_HDR)
+	$(CXX) $(CXXFLAGS) $(CUDA_INC) -c $< -o $@
+
+validate_cuda.o: $(TESTING_DIR)/validate_cuda.cpp $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(CUDA_INC) -c $< -o $@
+
+benchmark_cuda.o: $(TESTING_DIR)/benchmark_cuda.cpp $(HEADERS)
+	$(CXX) $(CXXFLAGS) $(CUDA_INC) -c $< -o $@
+
+# CUDA object files
+cuda_spmv.o: $(CUDA_SRC) $(CUDA_HDR)
+	$(NVCC) $(NVCCFLAGS) -c $< -o $@
+
+# Clean build artifacts
+clean:
+	rm -f $(CPP_OBJECTS) $(CU_OBJECTS) validate_cuda.o benchmark_cuda.o $(TARGETS)
+	rm -f benchmark_cuda_results.csv
+	rm -rf results_cuda/
+
+# Clean and rebuild
+rebuild: clean all
+
+# Run validation tests
+test: validate_cuda
+	./validate_cuda
+
+# Run benchmarks
+bench: benchmark_cuda
+	./benchmark_cuda
+
+# Generate plots (requires Python with matplotlib and pandas)
+plot: bench
+	python3 $(PLOTTING_DIR)/plot_cuda_results.py
+
+# Full workflow
+run: check_cuda all test bench plot
+
+.PHONY: all check_cuda clean rebuild test bench plot run
