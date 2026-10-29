@@ -185,7 +185,7 @@ The repo is already structured for deeper study, and the next step is to close t
 6. Buluç, A., et al. "Parallel sparse matrix-vector and matrix-transpose-vector multiplication using compressed sparse blocks." SPAA '09.
 7. Giannoula, C., et al. "SparseP: Towards efficient sparse matrix vector multiplication on real processing-in-memory architectures." PACM on Measurement and Analysis of Computing Systems, 2022.
 
-## Author and course context
+## Author 
 
 - Author: Ahmed Shmels Muhe (22617089)
 - Course: Parallel Computing (3090440020)
