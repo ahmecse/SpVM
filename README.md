@@ -1,146 +1,192 @@
-# Parallel Sparse Matrix–Vector Multiplication in OpenMP & CUDA
+# Parallel SpMV in OpenMP & CUDA
 
-### Workload Structure, Load Balance, and Data Movement
+A performance-focused C++ project for studying CSR-based sparse matrix–vector multiplication (SpMV) across serial, OpenMP, and CUDA implementations.
 
-An OpenMP and CUDA study of workload structure, memory behavior, and overhead in
-CSR sparse matrix–vector multiplication (SpMV), structured around four research
-questions on scaling, load balance, memory behavior, and GPU data movement.
+This repository is designed around a practical research question: how does workload structure, memory access pattern, and host/device data movement affect the performance of SpMV on modern parallel hardware?
 
-**Author:** Ahmed Shmels Muhe (22617089) · **Course:** Parallel Computing (3090440020) ·
-**Instructor:** Prof. He Guo · **Dept. of Software Technology, Dalian University of Technology**
-Contact: wzhang@mail.dlut.edu.cn
+## Project summary
 
----
+SpMV solves the linear-algebra operation
 
-## 1. Overview
+```text
+y = A · x
+```
 
-SpMV computes `y = A·x` for a sparse `m × n` matrix. Each nonzero costs one multiply
-and one add (≈ `2·nnz` FLOPs), but each nonzero also moves 12 bytes of matrix data
-(8-byte value + 4-byte index), so the kernel's arithmetic intensity is only
-≈ **0.17 FLOP/byte** — *memory-bound*. Three properties make it hard to speed up:
+where `A` is a sparse matrix and `x` is a dense vector. In sparse formats such as CSR (compressed sparse row), the matrix is stored by values, column indices, and row pointers instead of storing all zeros explicitly. This is ideal for large sparse problems, but it creates a memory-bound workload where performance is dominated more by bandwidth and irregular memory access than by arithmetic throughput.
 
-1. **Low arithmetic intensity** — memory traffic, not FLOPs, sets the pace.
-2. **Irregular access to `x`** — `col_idx` scatters reads across the vector.
-3. **Uneven row lengths** — equal row counts can mean unequal nonzero work per thread.
+This repository implements and benchmarks:
 
-This repository implements and benchmarks five CSR SpMV kernels, covering RQ1–RQ4:
+- Serial CSR SpMV baseline
+- OpenMP-parallel CSR SpMV
+- CUDA CSR kernels, including a shared-memory optimization
+- Validation and benchmarking pipelines
+- Plotting scripts for comparing performance trends
+
+## Why this project matters
+
+Sparse matrix multiplication is fundamental in:
+
+- scientific computing
+- graph analytics
+- iterative solvers
+- machine learning and optimization
+- finite element and PDE workloads
+
+The key challenge is that sparse kernels often have low arithmetic intensity: each nonzero may require a multiply and add, but the data movement can dominate the runtime. That makes workload balance and memory behavior critical for performance.
+
+## Research focus
+
+The work is organized around four research questions:
+
+1. Scaling: how does OpenMP SpMV behave as thread count changes?
+2. Load balance: when does static row scheduling become inefficient?
+3. Memory behavior: how do irregular accesses and matrix sparsity constrain speed?
+4. GPU data movement: how do transfer and allocation costs affect CUDA speedup?
+
+## Repository structure
+
+```text
+.
+├── src/
+│   ├── SparseMatrix.h, SparseMatrix.cpp       # CSR matrix representation
+│   ├── serial/                                 # Serial SpMV baseline
+│   ├── openmp/                                 # OpenMP SpMV implementation
+│   ├── cuda/                                   # CUDA scalar and shared-memory kernels
+│   ├── testing/                                # Validation and benchmarking executables
+│   └── plotting/                               # Plotting scripts for results
+├── docs/
+│   └── CUDA_GUIDE.md                           # CUDA build/run instructions
+├── Makefile                                    # CPU build system
+├── Makefile.cuda                               # CUDA build system
+├── benchmark_results.csv                       # Recorded 2-thread pilot results
+├── README.md                                   # Project overview
+└── Sparse-Matrix-Vector-Multiplication/        # Output/packaged artifacts
+```
+
+## Project status
 
 | Tag | Kernel | Status |
 |-----|--------|--------|
-| **S0** | Serial CSR row loop (baseline) | implemented, benchmarked |
-| **O0** | OpenMP static row-parallel loop | implemented, benchmarked (2 threads) |
-| **G0** | CUDA scalar kernel, one thread per row | implemented, correctness-validated |
-| **G1** | CUDA shared-memory kernel (stages `x` when `8n ≤ 48` KiB, i.e. `n ≤ 6144`) | implemented; auto-selected by size |
-| — | Nonzero-aware row partitioning (`bounds[t]` via prefix counts) | designed; not yet benchmarked |
+| S0 | Serial CSR row loop | Implemented and benchmarked |
+| O0 | OpenMP static row-parallel loop | Implemented and benchmarked |
+| G0 | CUDA scalar kernel | Implemented and correctness-validated |
+| G1 | CUDA shared-memory kernel | Implemented and automatically selected by size |
+| — | Nonzero-aware row partitioning | Designed, not yet benchmarked |
 
-### Research questions
+## Quick start
 
-- **RQ1 (Scaling):** How does OpenMP SpMV scale with threads on fixed and growing workloads?
-- **RQ2 (Load balance):** When does static row scheduling fail, and does nonzero-aware partitioning help?
-- **RQ3 (Memory behavior):** How do matrix footprint and irregular access to `x` limit performance?
-- **RQ4 (GPU data movement):** When does CUDA kernel speedup survive allocation and host–device transfers?
+### Requirements
 
-Timing scope: kernel time (`T_kernel`, CUDA events) is reported separately from
-end-to-end time (`T_E2E` = setup + H2D + kernel + D2H + cleanup).
+- GCC 7+ with C++17 and OpenMP support
+- Python 3 with `matplotlib` and `pandas` for plotting
+- Optional: CUDA Toolkit for GPU builds
 
-## 2. Repository structure
-
-```
-├── src/
-│   ├── SparseMatrix.{h,cpp}      # CSR matrix class (values, col_indices, row_ptr)
-│   ├── serial/                   # S0 serial kernel
-│   ├── openmp/                   # O0 OpenMP kernel
-│   ├── cuda/                     # G0 scalar + G1 shared-memory kernels
-│   ├── testing/                  # validate(.cuda).cpp, benchmark(.cuda).cpp
-│   └── plotting/                 # plot_results.py, plot_cuda_results.py
-├── docs/
-│   └── CUDA_GUIDE.md             # CUDA build/run guide
-├── Makefile                      # CPU build (serial + OpenMP)
-├── Makefile.cuda                 # CUDA build (adds G0/G1)
-├── benchmark_results.csv         # Recorded two-thread pilot (7 sizes, seed 42)
-└── README.md
-```
-
-## 3. Build and run
-
-### CPU (serial + OpenMP)
+### Build and run the CPU version
 
 ```bash
-make all        # build validate and benchmark
-make test       # correctness: 4×4, 100×100 @10%, 200×200 @2%, diagonal
-make bench      # writes benchmark_results.csv and results/*.png
-make plot       # speedup / execution-time / efficiency figures
-make run        # full workflow
+make all
+make test
+make bench
+make plot
 ```
 
-Requirements: GCC ≥ 7 with C++17 and OpenMP; Python 3 with matplotlib/pandas for plots.
-Thread count: `export OMP_NUM_THREADS=<p>` or edit `benchmark.cpp`.
-
-### CUDA (optional)
+Or run the full workflow in one step:
 
 ```bash
-make -f Makefile.cuda all    # requires CUDA toolkit (targets sm_60; adjust -arch for your GPU)
-make -f Makefile.cuda test   # includes CUDA validation (e.g. 1000×1000 @5%)
-make -f Makefile.cuda bench  # serial vs OpenMP vs CUDA comparison
+make run
 ```
 
-## 4. Validation
+### Build and run the CUDA version
 
-Every kernel is checked against dense matrix multiplication ground truth,
-`ε_max = max_i |y_impl − y_truth|`. All recorded runs satisfy `ε_max < 1e-10`.
-Row-wise parallelism is race-free by construction (each thread owns distinct `y[i]`).
+```bash
+make -f Makefile.cuda all
+make -f Makefile.cuda test
+make -f Makefile.cuda bench
+```
 
-## 5. Recorded results (two-thread CPU pilot)
+See [docs/CUDA_GUIDE.md](docs/CUDA_GUIDE.md) for GPU setup details and CUDA-specific guidance.
 
-Random square matrices at nominal 10% density, seed 42; whole-call means of 5 timed
-runs after 2 warm-ups. **This is a size sweep, not a scaling study** — a 2-thread
-point cannot establish strong/weak scaling; see §6.
+## Common commands
 
-| n | nnz | Serial (ms) | OpenMP (ms) | Speedup | Efficiency |
-|---:|---:|---:|---:|---:|---:|
-| 100 | 1,002 | 0.001458 | 0.001726 | 0.845× | 42.2% |
-| 200 | 3,957 | 0.005164 | 0.004930 | 1.047× | 52.4% |
-| 500 | 25,008 | 0.031886 | 0.026172 | 1.218× | 60.9% |
-| 1,000 | 100,084 | 0.118434 | 0.113091 | 1.047× | 52.4% |
-| 2,000 | 400,247 | 0.550202 | 0.420618 | 1.308× | 65.4% |
-| 5,000 | 2,498,138 | 3.477790 | 2.436810 | **1.427×** | **71.4%** |
-| 10,000 | 9,999,375 | 14.258790 | 10.178649 | 1.401× | 70.0% |
+```bash
+# Build all CPU targets
+make all
 
-(Speedups recomputed as the ratio of the displayed means.)
+# Validate correctness
+make test
 
-Reading:
+# Run benchmark suite
+make bench
 
-- **n = 100 is a slowdown (0.845×)** — thread startup + barrier dominate tiny workloads.
-- From **n = 2,000 onward** the speedup is a consistent 1.31–1.43× — the signature of a
-  bandwidth-limited kernel on 2 cores, not a compute-limited one.
-- Derived throughput at n = 10,000: 1.40 → 1.96 GFLOP/s, effective algorithmic bandwidth
-  8.4 → 11.8 GB/s — consistent with ~0.17 FLOP/byte intensity.
+# Generate plots
+make plot
 
-## 6. Roadmap (experiments required to close RQ1–RQ4)
+# Full workflow: build + validate + benchmark + plot
+make run
 
-- **Scaling sweep:** `OMP_NUM_THREADS = 1,2,4,8,…` per fixed matrix → strong scaling;
-  workloads with `nnz_p/p ≈ const` (n grows as √p) → weak scaling.
-- **Scheduling ablation:** static vs dynamic/guided vs nonzero-aware partitioning on
-  regular *and* skewed matrices, reporting work- and time-imbalance separately.
-- **CUDA end-to-end timing:** per-repetition `T_kernel` (events) *and* directly measured
-  `T_E2E` (wall clock), never summed component medians.
-- **Workload breadth:** sparser densities, severe row-skew, and real SuiteSparse matrices.
+# Clean build artifacts
+make clean
+```
 
-## 7. References
+For OpenMP thread count:
 
-1. N. Bell and M. Garland, "Implementing sparse matrix-vector multiplication on
-   throughput-oriented processors," SC '09. doi:10.1145/1654059.1654078
-2. S. Filippone et al., "Sparse matrix-vector multiplication on GPGPUs,"
-   ACM TOMS 43(4), 2017. doi:10.1145/3017994
-3. S. Williams et al., "Optimization of sparse matrix-vector multiplication on emerging
-   multicore platforms," Parallel Computing 35(3), 2009. doi:10.1016/j.parco.2008.12.006
-4. Y. Liu and B. Schmidt, "LightSpMV: Faster CUDA-compatible sparse matrix-vector
-   multiplication using compressed sparse rows," J. Signal Process. Syst. 90, 2018.
-   doi:10.1007/s11265-017-1280-7
-5. G. He and J. Gao, "A novel CSR-based sparse matrix-vector multiplication on GPUs,"
-   Math. Probl. Eng., 2016. doi:10.1155/2016/8471283
-6. A. Buluç et al., "Parallel sparse matrix-vector and matrix-transpose-vector
-   multiplication using compressed sparse blocks," SPAA '09. doi:10.1145/1583991.1584053
-7. C. Giannoula et al., "SparseP: Towards efficient sparse matrix vector multiplication on
-   real processing-in-memory architectures," PACM Meas. Anal. Comput. Syst. 6(1), 2022.
-   doi:10.1145/3508041
+```bash
+export OMP_NUM_THREADS=8
+make bench
+```
+
+## Validation
+
+Each implementation is checked against a dense-matrix ground truth. The project tracks
+
+```text
+ε_max = max_i |y_impl - y_truth|
+```
+
+and the recorded validation runs satisfy `ε_max < 1e-10` for tested cases. The row-wise parallel design remains race-free because each thread owns a distinct output element.
+
+## Performance snapshot
+
+The current benchmark file includes a two-thread CPU pilot over random square matrices at roughly 10% density.
+
+| n | nnz | Serial (ms) | OpenMP (ms) | Speedup |
+|---:|---:|---:|---:|---:|
+| 100 | 1,002 | 0.001458 | 0.001726 | 0.845× |
+| 200 | 3,957 | 0.005164 | 0.004930 | 1.047× |
+| 500 | 25,008 | 0.031886 | 0.026172 | 1.218× |
+| 1,000 | 100,084 | 0.118434 | 0.113091 | 1.047× |
+| 2,000 | 400,247 | 0.550202 | 0.420618 | 1.308× |
+| 5,000 | 2,498,138 | 3.477790 | 2.436810 | 1.427× |
+| 10,000 | 9,999,375 | 14.258790 | 10.178649 | 1.401× |
+
+Key takeaways:
+
+- Small matrices can be slower with OpenMP because of thread overhead.
+- The gain becomes clear as matrix size grows.
+- The behavior is consistent with a memory-bound kernel that is limited by bandwidth rather than floating-point compute.
+
+## Experimental roadmap
+
+The repo is already structured for deeper study, and the next step is to close the full research loop:
+
+- Strong and weak scaling studies across thread counts
+- Load-balance comparisons for regular and skewed matrices
+- CUDA end-to-end timing vs. kernel-only timing
+- Larger and more realistic sparse matrices from real workloads
+
+## References
+
+1. Bell, N., and Garland, M. "Implementing sparse matrix-vector multiplication on throughput-oriented processors." SC '09.
+2. Filippone, S., et al. "Sparse matrix-vector multiplication on GPGPUs." ACM Transactions on Mathematical Software, 2017.
+3. Williams, S., et al. "Optimization of sparse matrix-vector multiplication on emerging multicore platforms." Parallel Computing, 2009.
+4. Liu, Y., and Schmidt, B. "LightSpMV: Faster CUDA-compatible sparse matrix-vector multiplication using compressed sparse rows." Journal of Signal Processing Systems, 2018.
+5. He, G., and Gao, J. "A novel CSR-based sparse matrix-vector multiplication on GPUs." Mathematical Problems in Engineering, 2016.
+6. Buluç, A., et al. "Parallel sparse matrix-vector and matrix-transpose-vector multiplication using compressed sparse blocks." SPAA '09.
+7. Giannoula, C., et al. "SparseP: Towards efficient sparse matrix vector multiplication on real processing-in-memory architectures." PACM on Measurement and Analysis of Computing Systems, 2022.
+
+## Author and course context
+
+- Author: Ahmed Shmels Muhe (22617089)
+- Course: Parallel Computing (3090440020)
+- Instructor: Prof. He Guo
+- Department: Software Technology, Dalian University of Technology
