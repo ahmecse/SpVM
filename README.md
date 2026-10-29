@@ -13,6 +13,7 @@ y = A · x
 ```
 
 where `A` is a sparse matrix and `x` is a dense vector. In sparse formats such as CSR (compressed sparse row), the matrix is stored by values, column indices, and row pointers instead of storing all zeros explicitly. This is ideal for large sparse problems, but it creates a memory-bound workload where performance is dominated more by bandwidth and irregular memory access than by arithmetic throughput.
+![SpMV diagram](images/SpVM.svg)
 
 This repository implements and benchmarks:
 
