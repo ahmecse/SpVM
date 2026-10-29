@@ -2,7 +2,7 @@
 
 A performance-focused C++ project for studying CSR-based sparse matrix–vector multiplication (SpMV) across serial, OpenMP, and CUDA implementations.
 
-This repository is designed around a practical research question: how does workload structure, memory access pattern, and host/device data movement affect the performance of SpMV on modern parallel hardware?
+This repo is designed based on those research question: how does workload structure, memory access pattern, and host/device data movement affect the performance of SpMV on modern parallel hardware?
 
 ## Project summary
 
